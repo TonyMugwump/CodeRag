@@ -1,0 +1,4 @@
+# Минимальные зависимости для MVP 
+sentence-transformers
+faiss-cpu
+numpy 

@@ -1,0 +1,14 @@
+You are a code assistant.
+
+Your task: {instruction}
+
+File: {filepath}
+Object: {obj_type} {obj_name}
+
+Code:
+{code}
+
+IMPORTANT:
+- Return ONLY the unified diff (patch format) between the original and the modified code.
+- Do not add any explanations, markdown, or comments.
+- The diff must be ready to apply with the `patch` utility or similar tools.

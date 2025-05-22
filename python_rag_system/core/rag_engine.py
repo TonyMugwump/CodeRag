@@ -255,17 +255,25 @@ class PythonRAGEngine:
         """Поиск по коду"""
         
         # Создаем фильтр
-        where_filter = {}
+        where_filter = None
+        conditions = []
+        
         if filter_type:
-            where_filter['type'] = filter_type
+            conditions.append({'type': {'$eq': filter_type}})
         if filter_file:
-            where_filter['file_path'] = {"$contains": filter_file}
+            conditions.append({'file_path': {"$contains": filter_file}})
+        
+        if conditions:
+            if len(conditions) == 1:
+                where_filter = conditions[0]
+            else:
+                where_filter = {'$and': conditions}
         
         # Выполняем поиск
         results = self.collection.query(
             query_texts=[query],
             n_results=n_results,
-            where=where_filter if where_filter else None
+            where=where_filter
         )
         
         # Форматируем результаты
@@ -282,16 +290,109 @@ class PythonRAGEngine:
         
         return formatted_results
     
+    def search_by_name(self, name: str, element_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Поиск элементов по точному имени"""
+        if element_type:
+            where_filter = {
+                '$and': [
+                    {'name': {'$eq': name}},
+                    {'type': {'$eq': element_type}}
+                ]
+            }
+        else:
+            where_filter = {'name': {'$eq': name}}
+        
+        try:
+            results = self.collection.query(
+                query_texts=[name],  # Используем имя как запрос для семантического поиска
+                n_results=50,  # Увеличиваем количество для фильтрации
+                where=where_filter
+            )
+            
+            # Форматируем результаты
+            formatted_results = []
+            if results['documents'] and results['documents'][0]:
+                for i, doc in enumerate(results['documents'][0]):
+                    result = {
+                        'document': doc,
+                        'metadata': results['metadatas'][0][i],
+                        'distance': results['distances'][0][i] if results['distances'] else None,
+                        'id': results['ids'][0][i]
+                    }
+                    formatted_results.append(result)
+            
+            return formatted_results
+        except Exception as e:
+            console.print(f"[yellow]Ошибка поиска по имени {name}: {e}[/yellow]")
+            # Fallback к семантическому поиску
+            return self.search(name, filter_type=element_type)
+    
+    def list_available_functions(self) -> List[str]:
+        """Возвращает список всех доступных функций"""
+        try:
+            results = self.collection.query(
+                query_texts=["function"],
+                n_results=1000,
+                where={'type': {'$in': ['function', 'async_function']}}
+            )
+            
+            function_names = []
+            if results['metadatas'] and results['metadatas'][0]:
+                for metadata in results['metadatas'][0]:
+                    function_names.append(metadata['name'])
+            
+            return sorted(list(set(function_names)))
+        except Exception as e:
+            console.print(f"[yellow]Ошибка получения списка функций: {e}[/yellow]")
+            return []
+    
+    def list_available_classes(self) -> List[str]:
+        """Возвращает список всех доступных классов"""
+        try:
+            results = self.collection.query(
+                query_texts=["class"],
+                n_results=1000,
+                where={'type': 'class'}
+            )
+            
+            class_names = []
+            if results['metadatas'] and results['metadatas'][0]:
+                for metadata in results['metadatas'][0]:
+                    class_names.append(metadata['name'])
+            
+            return sorted(list(set(class_names)))
+        except Exception as e:
+            console.print(f"[yellow]Ошибка получения списка классов: {e}[/yellow]")
+            return []
+
     def get_function_context(self, function_name: str, include_callers: bool = True, include_callees: bool = True) -> Dict[str, Any]:
         """Получает полный контекст функции включая вызовы"""
         
-        # Ищем функцию
-        results = self.search(f"name:{function_name}", filter_type="function")
+        # Сначала ищем по точному имени
+        results = self.search_by_name(function_name, "function")
         if not results:
-            results = self.search(f"name:{function_name}", filter_type="async_function")
+            results = self.search_by_name(function_name, "async_function")
+        
+        # Если не найдено по точному имени, пробуем семантический поиск
+        if not results:
+            results = self.search(function_name, filter_type="function")
+            if not results:
+                results = self.search(function_name, filter_type="async_function")
         
         if not results:
-            return {"error": f"Функция {function_name} не найдена"}
+            # Показываем доступные функции для помощи
+            available_functions = self.list_available_functions()
+            similar_names = [name for name in available_functions if function_name.lower() in name.lower()]
+            
+            error_msg = f"Функция '{function_name}' не найдена"
+            if similar_names:
+                error_msg += f". Возможно, вы имели в виду: {', '.join(similar_names[:5])}"
+            elif available_functions:
+                error_msg += f". Доступные функции: {', '.join(available_functions[:10])}"
+                if len(available_functions) > 10:
+                    error_msg += f" и еще {len(available_functions) - 10}..."
+            
+            return {"error": error_msg}
         
         main_function = results[0]
         context = {
@@ -303,33 +404,57 @@ class PythonRAGEngine:
         }
         
         # Получаем flow информацию из парсера
-        flow_info = self.parser.get_function_flow(function_name)
-        if flow_info:
-            context['flow_info'] = flow_info
-            
-            # Ищем функции, которые вызывает данная функция
-            if include_callees and flow_info.get('calls'):
-                for called_func in flow_info['calls']:
-                    func_name = called_func.split('::')[-1]
-                    callees = self.search(f"name:{func_name}")
-                    context['callees'].extend(callees[:2])  # Ограничиваем количество
-            
-            # Ищем функции, которые вызывают данную функцию
-            if include_callers and flow_info.get('called_by'):
-                for caller_func in flow_info['called_by']:
-                    func_name = caller_func.split('::')[-1]
-                    callers = self.search(f"name:{func_name}")
-                    context['callers'].extend(callers[:2])  # Ограничиваем количество
+        try:
+            flow_info = self.parser.get_function_flow(function_name)
+            if flow_info:
+                context['flow_info'] = flow_info
+                
+                # Ищем функции, которые вызывает данная функция
+                if include_callees and flow_info.get('calls'):
+                    for called_func in flow_info['calls']:
+                        func_name = called_func.split('::')[-1]
+                        callees = self.search_by_name(func_name)
+                        if not callees:
+                            callees = self.search(func_name)
+                        context['callees'].extend(callees[:2])  # Ограничиваем количество
+                
+                # Ищем функции, которые вызывают данную функцию
+                if include_callers and flow_info.get('called_by'):
+                    for caller_func in flow_info['called_by']:
+                        func_name = caller_func.split('::')[-1]
+                        callers = self.search_by_name(func_name)
+                        if not callers:
+                            callers = self.search(func_name)
+                        context['callers'].extend(callers[:2])  # Ограничиваем количество
+        except Exception as e:
+            console.print(f"[yellow]Предупреждение: не удалось получить flow информацию для {function_name}: {e}[/yellow]")
         
         return context
     
     def get_class_context(self, class_name: str) -> Dict[str, Any]:
         """Получает полный контекст класса"""
         
-        # Ищем класс
-        results = self.search(f"name:{class_name}", filter_type="class")
+        # Сначала ищем по точному имени
+        results = self.search_by_name(class_name, "class")
+        
+        # Если не найдено по точному имени, пробуем семантический поиск
         if not results:
-            return {"error": f"Класс {class_name} не найден"}
+            results = self.search(class_name, filter_type="class")
+        
+        if not results:
+            # Показываем доступные классы для помощи
+            available_classes = self.list_available_classes()
+            similar_names = [name for name in available_classes if class_name.lower() in name.lower()]
+            
+            error_msg = f"Класс '{class_name}' не найден"
+            if similar_names:
+                error_msg += f". Возможно, вы имели в виду: {', '.join(similar_names[:5])}"
+            elif available_classes:
+                error_msg += f". Доступные классы: {', '.join(available_classes[:10])}"
+                if len(available_classes) > 10:
+                    error_msg += f" и еще {len(available_classes) - 10}..."
+            
+            return {"error": error_msg}
         
         main_class = results[0]
         context = {
@@ -338,31 +463,77 @@ class PythonRAGEngine:
             'related_functions': []
         }
         
-        # Ищем методы класса
+        # Ищем методы класса по файлу и родительскому классу
         file_path = main_class['metadata']['file_path']
-        methods = self.search(f"file:{file_path}", filter_type="function")
         
-        # Фильтруем методы, которые принадлежат этому классу
-        for method in methods:
-            if class_name.lower() in method['document'].lower():
-                context['methods'].append(method)
+        try:
+            # Ищем методы через метаданные parent
+            methods = self.collection.query(
+                query_texts=[class_name],
+                n_results=100,
+                where={
+                    '$and': [
+                        {'file_path': {'$eq': file_path}},
+                        {'type': {'$in': ['function', 'async_function']}},
+                        {'parent': {'$eq': class_name}}
+                    ]
+                }
+            )
+            
+            if methods['documents'] and methods['documents'][0]:
+                for i, doc in enumerate(methods['documents'][0]):
+                    method_result = {
+                        'document': doc,
+                        'metadata': methods['metadatas'][0][i],
+                        'distance': methods['distances'][0][i] if methods['distances'] else None,
+                        'id': methods['ids'][0][i]
+                    }
+                    context['methods'].append(method_result)
+        except Exception as e:
+            console.print(f"[yellow]Предупреждение: не удалось найти методы для класса {class_name}: {e}[/yellow]")
+            # Fallback к поиску по файлу
+            methods = self.search(f"file:{file_path}", filter_type="function")
+            for method in methods:
+                if class_name.lower() in method['document'].lower():
+                    context['methods'].append(method)
         
         return context
     
     def get_file_summary(self, file_path: str) -> Dict[str, Any]:
         """Получает сводку по файлу"""
         
-        results = self.search(f"file:{file_path}")
+        # Используем правильный фильтр по метаданным
+        try:
+            results = self.collection.query(
+                query_texts=[file_path],
+                n_results=1000,
+                where={'file_path': {'$eq': file_path}}
+            )
+            
+            formatted_results = []
+            if results['documents'] and results['documents'][0]:
+                for i, doc in enumerate(results['documents'][0]):
+                    result = {
+                        'document': doc,
+                        'metadata': results['metadatas'][0][i],
+                        'distance': results['distances'][0][i] if results['distances'] else None,
+                        'id': results['ids'][0][i]
+                    }
+                    formatted_results.append(result)
+        except Exception as e:
+            console.print(f"[yellow]Ошибка поиска по файлу {file_path}: {e}[/yellow]")
+            # Fallback к семантическому поиску
+            formatted_results = self.search(file_path)
         
         summary = {
             'file_path': file_path,
             'functions': [],
             'classes': [],
             'imports': [],
-            'total_elements': len(results)
+            'total_elements': len(formatted_results)
         }
         
-        for result in results:
+        for result in formatted_results:
             element_type = result['metadata']['type']
             if element_type in ['function', 'async_function']:
                 summary['functions'].append(result)
