@@ -132,6 +132,9 @@ dmypy.json
 .chroma_*
 *.chroma
 chroma_db/
+.demo_chroma_store/
+.test_chroma_store/
+.test_chroma_ollama_store/
 
 # RAG system specific
 *.mmd
@@ -150,4 +153,8 @@ Thumbs.db
 
 # Temporary files
 *.tmp
-*.temp 
+*.temp
+
+# Other projects (not part of CodeRag)
+agents_mvp/
+docs/ 
