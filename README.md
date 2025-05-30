@@ -1,8 +1,8 @@
 [English version](README.en.md)
 
-# 🐍 Python RAG System
+# 🐍 Python and JS RAG System
 
-Мощная система анализа Python кода с использованием ChromaDB и LLM для создания интеллектуального RAG (Retrieval-Augmented Generation) решения.
+Мощная система анализа Python и JS кода с использованием ChromaDB и LLM для создания интеллектуального RAG (Retrieval-Augmented Generation) решения.
 
 ## 🚀 Возможности
 
