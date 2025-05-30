@@ -1,0 +1,8 @@
+conan_gemini_repo/jest.config.js
+conan_gemini_repo/indexAlt.js
+conan_gemini_repo/db.js
+conan_gemini_repo/scenes/gameScene.js
+conan_gemini_repo/scenes/userScene.js
+conan_gemini_repo/index.js
+conan_gemini_repo/config.js
+conan_gemini_repo/logger.js

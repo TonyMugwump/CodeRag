@@ -1,12 +1,16 @@
 import ast
 import os
 import inspect
+import subprocess
+import json as pyjson
 from typing import Dict, List, Optional, Tuple, Any, Set
 from dataclasses import dataclass, field
 from pathlib import Path
+from abc import ABC, abstractmethod
 import networkx as nx
 from rich.console import Console
 from rich.tree import Tree
+import logging
 
 console = Console()
 
@@ -42,14 +46,45 @@ class CodeElement:
             'complexity': self.complexity
         }
 
-class PythonCodeParser:
-    """Парсер Python кода для извлечения структуры и зависимостей"""
-    
+class BaseCodeParser(ABC):
+    """Базовый парсер кода для разных языков"""
     def __init__(self):
         self.elements: Dict[str, CodeElement] = {}
         self.call_graph = nx.DiGraph()
         self.dependency_graph = nx.DiGraph()
         self.file_tree = Tree("Project Structure")
+
+    def _calculate_complexity(self):
+        """Вычисляет сложность для каждого элемента"""
+        for element in self.elements.values():
+            if element.type in ['function', 'async_function']:
+                lines_count = element.line_end - element.line_start + 1
+                calls_count = len(element.calls)
+                element.complexity = lines_count + calls_count * 2
+
+    def _build_dependency_graph(self):
+        """Строит граф зависимостей между модулями"""
+        for element_key, element in self.elements.items():
+            if element.type == 'import':
+                file_path = element.file_path
+                self.dependency_graph.add_edge(file_path, element.name)
+
+    @abstractmethod
+    def parse_file(self, file_path: str) -> List[CodeElement]:
+        pass
+
+    @abstractmethod
+    def parse_project(self, project_path: str, exclude_patterns: List[str] = None) -> Dict[str, List[CodeElement]]:
+        pass
+
+    @abstractmethod
+    def get_project_summary(self) -> Dict[str, Any]:
+        pass
+
+class PythonCodeParser(BaseCodeParser):
+    """Парсер Python кода для извлечения структуры и зависимостей"""
+    def __init__(self):
+        super().__init__()
         
     def parse_file(self, file_path: str) -> List[CodeElement]:
         """Парсит один Python файл"""
@@ -220,23 +255,6 @@ class PythonCodeParser:
                     called_full = f"{file_path}::{called_func}"
                     self.call_graph.add_edge(current_function, called_full)
     
-    def _build_dependency_graph(self):
-        """Строит граф зависимостей между модулями"""
-        for element_key, element in self.elements.items():
-            if element.type == 'import':
-                file_path = element.file_path
-                # Добавляем зависимость файла от импортируемого модуля
-                self.dependency_graph.add_edge(file_path, element.name)
-    
-    def _calculate_complexity(self):
-        """Вычисляет сложность для каждого элемента"""
-        for element in self.elements.values():
-            if element.type in ['function', 'async_function']:
-                # Простая метрика сложности: количество строк + количество вызовов
-                lines_count = element.line_end - element.line_start + 1
-                calls_count = len(element.calls)
-                element.complexity = lines_count + calls_count * 2
-    
     def get_function_flow(self, function_name: str) -> Dict[str, Any]:
         """Получает flow для конкретной функции"""
         matching_functions = [key for key in self.elements.keys() if function_name in key]
@@ -301,4 +319,121 @@ class PythonCodeParser:
             'files_analyzed': len(set(e.file_path for e in self.elements.values())),
             'call_graph_edges': self.call_graph.number_of_edges(),
             'dependency_graph_edges': self.dependency_graph.number_of_edges()
-        } 
+        }
+
+class JavaScriptCodeParser(BaseCodeParser):
+    """Парсер JavaScript кода (batch + мониторинг)"""
+    def __init__(self):
+        super().__init__()
+
+    def parse_file(self, file_path: str) -> List[CodeElement]:
+        # Not used in batch mode
+        return []
+
+    def parse_project(self, project_path: str, exclude_patterns: List[str] = None) -> Dict[str, List[CodeElement]]:
+        if exclude_patterns is None:
+            exclude_patterns = ['__pycache__', '.git', '.venv', 'venv', 'node_modules', '.pytest_cache']
+        project_elements = {}
+        js_files = []
+        for root, dirs, files in os.walk(project_path):
+            dirs[:] = [d for d in dirs if not any(pattern in d for pattern in exclude_patterns)]
+            for file in files:
+                if file.endswith('.js'):
+                    js_files.append(os.path.join(root, file))
+        if not js_files:
+            return {}
+        batch_size = 20
+        max_retries = 3
+        timeout = 60  # seconds
+        for i in range(0, len(js_files), batch_size):
+            batch = js_files[i:i+batch_size]
+            attempt = 0
+            while attempt < max_retries:
+                try:
+                    logging.info(f"[JSParser] Batch parsing files {i+1}-{i+len(batch)} of {len(js_files)} (attempt {attempt+1})...")
+                    result = subprocess.run(
+                        ["node", os.path.join(os.path.dirname(__file__), "../../js_parser.js"), *batch],
+                        capture_output=True, text=True, check=True, timeout=timeout
+                    )
+                    parsed = pyjson.loads(result.stdout)
+                    elements_data = parsed["elements"] if isinstance(parsed, dict) else parsed
+                    call_edges = parsed["callEdges"] if isinstance(parsed, dict) and "callEdges" in parsed else []
+                    for elem in elements_data:
+                        code_elem = CodeElement(
+                            name=elem.get('name'),
+                            type=elem.get('type'),
+                            file_path=elem.get('file_path'),
+                            line_start=elem.get('line_start'),
+                            line_end=elem.get('line_end'),
+                            source_code=elem.get('source_code'),
+                            docstring=elem.get('docstring'),
+                            parent=elem.get('parent'),
+                            children=elem.get('children', []),
+                            dependencies=set(elem.get('dependencies', [])),
+                            calls=set(elem.get('calls', [])),
+                            complexity=elem.get('complexity', 0)
+                        )
+                        self.elements[f"{code_elem.file_path}::{code_elem.name}"] = code_elem
+                        rel_path = os.path.relpath(code_elem.file_path, project_path)
+                        if rel_path not in project_elements:
+                            project_elements[rel_path] = []
+                        project_elements[rel_path].append(code_elem)
+                    # Build call graph for JS
+                    for edge in call_edges:
+                        from_key = f"{edge['from']['file']}::{edge['from']['name']}"
+                        to_key = f"{edge['to']['file']}::{edge['to']['name']}"
+                        self.call_graph.add_edge(from_key, to_key)
+                    logging.info(f"[JSParser] Parsed {len(elements_data)} elements from batch {i+1}-{i+len(batch)}.")
+                    break  # success, exit retry loop
+                except subprocess.TimeoutExpired:
+                    attempt += 1
+                    logging.warning(f"[JSParser] Timeout on batch {i+1}-{i+len(batch)} (attempt {attempt})")
+                except Exception as e:
+                    attempt += 1
+                    logging.error(f"[JSParser] ERROR batch parsing JS files {i+1}-{i+len(batch)} (attempt {attempt}): {e}")
+            else:
+                logging.error(f"[JSParser] FAILED to parse batch {i+1}-{i+len(batch)} after {max_retries} attempts.")
+        self._calculate_complexity()
+        return project_elements
+
+    def get_function_flow(self, function_name: str) -> Dict[str, Any]:
+        # JS: emulate Python logic using call_graph
+        matching_functions = [key for key in self.elements.keys() if function_name in key]
+        if not matching_functions:
+            return {}
+        func_key = matching_functions[0]
+        element = self.elements[func_key]
+        call_graph_key = f"{element.file_path}::{element.name}"
+        called_by = []
+        calls_this = []
+        if self.call_graph.has_node(call_graph_key):
+            called_by = list(self.call_graph.successors(call_graph_key))
+            calls_this = list(self.call_graph.predecessors(call_graph_key))
+        return {
+            'element': element.to_dict(),
+            'calls': called_by,
+            'called_by': calls_this,
+            'complexity': element.complexity
+        }
+
+    def export_call_graph_mermaid(self) -> str:
+        mermaid = ["graph TD"]
+        for edge in self.call_graph.edges():
+            source = edge[0].split("::")[-1]
+            target = edge[1].split("::")[-1]
+            mermaid.append(f"    {source} --> {target}")
+        return "\n".join(mermaid)
+
+    def get_project_summary(self) -> Dict[str, Any]:
+        functions_count = len([e for e in self.elements.values() if e.type == 'function'])
+        classes_count = len([e for e in self.elements.values() if e.type == 'class'])
+        imports_count = len([e for e in self.elements.values() if e.type == 'import'])
+        return {
+            'total_elements': len(self.elements),
+            'functions': functions_count,
+            'classes': classes_count,
+            'imports': imports_count,
+            'files_analyzed': len(set(e.file_path for e in self.elements.values())),
+            'call_graph_edges': self.call_graph.number_of_edges(),
+            'dependency_graph_edges': self.dependency_graph.number_of_edges()
+        }

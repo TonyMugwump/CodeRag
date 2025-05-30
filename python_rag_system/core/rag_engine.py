@@ -10,20 +10,21 @@ import tiktoken
 from rich.console import Console
 from rich.progress import Progress, TaskID
 
-from .code_parser import PythonCodeParser, CodeElement
+from .code_parser import PythonCodeParser, JavaScriptCodeParser, CodeElement
 from .embeddings import EmbeddingFactory, EmbeddingProvider
 
 console = Console()
 
 class PythonRAGEngine:
-    """RAG движок для Python проектов с ChromaDB"""
+    """RAG движок для Python и JS проектов с ChromaDB"""
     
     def __init__(self, 
                  collection_name: str = "python_code_rag",
                  persist_directory: str = ".chroma_rag_store",
                  embedding_provider: str = "sentence_transformers",
                  embedding_model: str = "all-MiniLM-L6-v2",
-                 ollama_base_url: str = "http://localhost:11434"):
+                 ollama_base_url: str = "http://localhost:11434",
+                 language: str = "python"):
         
         self.collection_name = collection_name
         self.persist_directory = persist_directory
@@ -123,7 +124,10 @@ class PythonRAGEngine:
             console.print(f"[yellow]Создана коллекция с уникальным именем: {unique_name}[/yellow]")
         
         # Парсер кода
-        self.parser = PythonCodeParser()
+        if language.lower() == "javascript" or language.lower() == "js":
+            self.parser = JavaScriptCodeParser()
+        else:
+            self.parser = PythonCodeParser()
         
         # Токенизатор для подсчета токенов
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
@@ -501,15 +505,14 @@ class PythonRAGEngine:
     
     def get_file_summary(self, file_path: str) -> Dict[str, Any]:
         """Получает сводку по файлу"""
-        
-        # Используем правильный фильтр по метаданным
+        # For JS, use only the filename for file_path filter (since metadata stores just the filename)
+        file_key = os.path.basename(file_path)
         try:
             results = self.collection.query(
-                query_texts=[file_path],
+                query_texts=[file_key],
                 n_results=1000,
-                where={'file_path': {'$eq': file_path}}
+                where={'file_path': {'$eq': file_key}}
             )
-            
             formatted_results = []
             if results['documents'] and results['documents'][0]:
                 for i, doc in enumerate(results['documents'][0]):
@@ -523,8 +526,7 @@ class PythonRAGEngine:
         except Exception as e:
             console.print(f"[yellow]Ошибка поиска по файлу {file_path}: {e}[/yellow]")
             # Fallback к семантическому поиску
-            formatted_results = self.search(file_path)
-        
+            formatted_results = self.search(file_key)
         summary = {
             'file_path': file_path,
             'functions': [],
@@ -532,7 +534,6 @@ class PythonRAGEngine:
             'imports': [],
             'total_elements': len(formatted_results)
         }
-        
         for result in formatted_results:
             element_type = result['metadata']['type']
             if element_type in ['function', 'async_function']:
@@ -541,7 +542,6 @@ class PythonRAGEngine:
                 summary['classes'].append(result)
             elif element_type == 'import':
                 summary['imports'].append(result)
-        
         return summary
     
     def _save_call_graph(self):
@@ -602,4 +602,4 @@ class PythonRAGEngine:
             'embedding_provider': self.embedding_provider_type,
             'embedding_model': self.embedding_model_name,
             'embedding_dimension': self.embedding_provider.get_dimension()
-        } 
+        }

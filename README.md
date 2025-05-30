@@ -1,3 +1,5 @@
+[English version](README.en.md)
+
 # 🐍 Python RAG System
 
 Мощная система анализа Python кода с использованием ChromaDB и LLM для создания интеллектуального RAG (Retrieval-Augmented Generation) решения.
@@ -31,6 +33,41 @@
 - **Интерактивный режим**: Диалоговый интерфейс для исследования
 - **Экспорт документации**: Автоматическая генерация документации
 - **Mermaid диаграммы**: Визуализация графов вызовов
+
+## 🟦 Поддержка JavaScript (ES)
+
+Система теперь поддерживает анализ и индексацию JavaScript (ES) проектов наряду с Python!
+
+- **Парсинг JS**: Извлечение функций, классов, импортов из .js файлов
+- **CLI**: Опция `--language javascript` для индексации JS-проектов
+- **Совместимость**: Работает с современным ES-кодом (без TypeScript)
+- **Требования**: Node.js и пакет `esprima` должны быть установлены (`npm install esprima`)
+
+### Пример индексации JS-проекта
+
+```bash
+python -m python_rag_system.cli index ./your_js_project --language javascript
+```
+
+### Пример поиска по JS-коду
+
+```bash
+python -m python_rag_system.cli search "функция для обработки данных" --language javascript
+```
+
+### Программное использование для JS
+
+```python
+from python_rag_system import PythonRAGEngine
+
+rag_engine = PythonRAGEngine(
+    collection_name="my_js_project",
+    persist_directory=".chroma_js_store",
+    language="javascript"
+)
+summary = rag_engine.index_project("./my_js_project")
+print(f"Проиндексировано {summary['total_elements']} элементов JS")
+```
 
 ## 📦 Установка
 
@@ -206,6 +243,20 @@ analysis = analyzer.analyze_function("my_function")
 analyzer.display_analysis_result(analysis, "function")
 ```
 
+### Программное использование для JS
+
+```python
+from python_rag_system import PythonRAGEngine
+
+rag_engine = PythonRAGEngine(
+    collection_name="my_js_project",
+    persist_directory=".chroma_js_store",
+    language="javascript"
+)
+summary = rag_engine.index_project("./my_js_project")
+print(f"Проиндексировано {summary['total_elements']} элементов JS")
+```
+
 ### Продвинутое использование
 
 ```python
@@ -276,6 +327,7 @@ python_rag_system/
 | `--limit` | Лимит результатов | `5` |
 | `--type-filter` | Фильтр по типу | - |
 | `--exclude` | Исключить паттерны | - |
+| `--language` | Язык проекта (python/javascript) | `python` |
 
 ## 🔧 Конфигурация
 
@@ -395,6 +447,19 @@ graph TD
 
 ## 🧪 Тестирование
 
+### Тестирование на больших JS-проектах
+
+Для проверки системы на реальных JS-проектах используйте:
+
+```bash
+python -m python_rag_system.cli index ./path/to/large-js-project --language javascript
+python -m python_rag_system.cli search "название функции" --language javascript
+```
+
+- Система корректно индексирует большие JS codebases (100+ файлов)
+- Поддерживаются ES6+ классы, функции, импорты
+- Для TypeScript используйте предварительную компиляцию в JS
+
 ```bash
 # Запуск демонстрации
 python example_usage.py
@@ -507,4 +572,4 @@ MIT License - см. файл LICENSE
 
 ---
 
-**Создано с ❤️ для разработчиков Python** 
+**Создано с ❤️ для разработчиков Python и JavaScript ES**

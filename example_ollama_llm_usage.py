@@ -12,12 +12,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from python_rag_system.core.rag_engine import PythonRAGEngine
 from python_rag_system.core.unified_llm_analyzer import UnifiedLLMCodeAnalyzer
+from python_rag_system.core import lang
 from rich.console import Console
 
 console = Console()
 
 def main():
-    console.print("[bold blue]🚀 Пример использования Python RAG System с Ollama LLM[/bold blue]")
+    console.print(lang.tr("example_usage"))
     
     # Настройки
     project_path = "./python_rag_system"  # Анализируем саму систему
@@ -26,7 +27,7 @@ def main():
     
     try:
         # 1. Создаем RAG движок с Ollama эмбеддингами
-        console.print("\n[yellow]1. Инициализация RAG движка с Ollama эмбеддингами...[/yellow]")
+        console.print(lang.tr("initializing_rag_engine"))
         rag_engine = PythonRAGEngine(
             collection_name=collection_name,
             persist_directory=persist_dir,
@@ -36,17 +37,17 @@ def main():
         )
         
         # 2. Индексируем проект
-        console.print("\n[yellow]2. Индексация проекта...[/yellow]")
+        console.print(lang.tr("indexing_project"))
         summary = rag_engine.index_project(project_path)
         
         if summary:
-            console.print(f"[green]✅ Проиндексировано {summary['total_elements']} элементов[/green]")
+            console.print(lang.tr("indexing_complete", total_elements=summary['total_elements']))
         else:
-            console.print("[red]❌ Ошибка индексации[/red]")
+            console.print(lang.tr("indexing_error"))
             return
         
         # 3. Создаем LLM анализатор с Ollama
-        console.print("\n[yellow]3. Инициализация Ollama LLM анализатора...[/yellow]")
+        console.print(lang.tr("initializing_llm_analyzer"))
         analyzer = UnifiedLLMCodeAnalyzer(
             rag_engine=rag_engine,
             llm_provider="ollama",
@@ -55,57 +56,53 @@ def main():
         )
         
         if not analyzer.available:
-            console.print("[red]❌ Ollama LLM недоступен. Убедитесь что:[/red]")
-            console.print("[red]  - Ollama запущен (ollama serve)[/red]")
-            console.print("[red]  - Модель gemma3:27b установлена (ollama pull gemma3:27b)[/red]")
+            console.print(lang.tr("ollama_unavailable"))
             return
         
         # 4. Тестируем поиск
-        console.print("\n[yellow]4. Тестирование семантического поиска...[/yellow]")
-        search_results = rag_engine.search("функция для анализа кода", n_results=3)
+        console.print(lang.tr("testing_semantic_search"))
+        search_results = rag_engine.search(lang.tr("search_query"), n_results=3)
         
         for i, result in enumerate(search_results, 1):
             metadata = result['metadata']
-            console.print(f"[cyan]{i}. {metadata['name']} ({metadata['type']}) - {metadata['file_path']}[/cyan]")
+            console.print(lang.tr("search_result", index=i, name=metadata['name'], type=metadata['type'], file_path=metadata['file_path']))
         
         # 5. Анализируем функцию с помощью LLM
         if search_results:
-            console.print("\n[yellow]5. Анализ функции с помощью Ollama LLM...[/yellow]")
+            console.print(lang.tr("analyzing_function"))
             function_name = search_results[0]['metadata']['name']
             
-            console.print(f"[cyan]Анализируем функцию: {function_name}[/cyan]")
+            console.print(lang.tr("analyzing_function_name", function_name=function_name))
             result = analyzer.analyze_function(function_name)
             analyzer.display_analysis_result(result, "function")
         
         # 6. Задаем вопрос о коде
-        console.print("\n[yellow]6. Задаем вопрос о коде...[/yellow]")
-        question = "Как работает индексация проекта в этой системе?"
+        console.print(lang.tr("asking_code_question"))
+        question = lang.tr("code_question")
         result = analyzer.answer_code_question(question)
         analyzer.display_analysis_result(result, "question")
         
         # 7. Анализируем flow выполнения
-        console.print("\n[yellow]7. Анализ flow выполнения...[/yellow]")
+        console.print(lang.tr("analyzing_execution_flow"))
         if search_results:
             function_name = search_results[0]['metadata']['name']
             result = analyzer.explain_code_flow(function_name)
             analyzer.display_analysis_result(result, "flow")
         
         # 8. Предлагаем улучшения
-        console.print("\n[yellow]8. Предложения по улучшению...[/yellow]")
+        console.print(lang.tr("suggesting_improvements"))
         if search_results:
             function_name = search_results[0]['metadata']['name']
             result = analyzer.suggest_improvements(function_name)
             analyzer.display_analysis_result(result, "improvements")
         
-        console.print("\n[green]🎉 Демонстрация завершена успешно![/green]")
-        console.print("\n[blue]Теперь вы можете использовать CLI команды:[/blue]")
-        console.print("[blue]python -m python_rag_system.cli analyze <function_name> --llm-provider ollama --model gemma3:27b[/blue]")
-        console.print("[blue]python -m python_rag_system.cli interactive --llm-provider ollama --llm-model gemma3:27b[/blue]")
+        console.print("\n[green]🎉 " + lang.tr('analysis_done') + "[/green]")
+        console.print("\n[blue]" + lang.tr('demo_interactive') + "[/blue]")
+        console.print("python -m python_rag_system.cli interactive")
         
     except Exception as e:
-        console.print(f"[red]❌ Ошибка: {e}[/red]")
-        import traceback
-        console.print(f"[red]{traceback.format_exc()}[/red]")
+        console.print(f"[red]{lang.tr('error', error=e)}[/red]")
+        console.print("\n[yellow]" + lang.tr('set_env') + "[/yellow]")
 
 if __name__ == "__main__":
-    main() 
+    main()

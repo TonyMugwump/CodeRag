@@ -13,20 +13,23 @@ from rich.prompt import Prompt, Confirm
 from .core.rag_engine import PythonRAGEngine
 from .core.llm_integration import LLMCodeAnalyzer
 from .core.unified_llm_analyzer import UnifiedLLMCodeAnalyzer
+from python_rag_system.core import lang
 
 console = Console()
 
 def create_rag_engine(collection_name: str, persist_dir: str, 
                      embedding_provider: str = "sentence_transformers",
                      embedding_model: str = "all-MiniLM-L6-v2",
-                     ollama_url: str = "http://localhost:11434") -> PythonRAGEngine:
+                     ollama_url: str = "http://localhost:11434",
+                     language: str = "python") -> PythonRAGEngine:
     """Создает RAG движок с указанными параметрами"""
     return PythonRAGEngine(
         collection_name=collection_name,
         persist_directory=persist_dir,
         embedding_provider=embedding_provider,
         embedding_model=embedding_model,
-        ollama_base_url=ollama_url
+        ollama_base_url=ollama_url,
+        language=language
     )
 
 @click.group()
@@ -45,10 +48,11 @@ def cli():
 @click.option('--ollama-url', default='http://localhost:11434', help='URL Ollama сервера')
 @click.option('--exclude', '-e', multiple=True, help='Паттерны для исключения файлов')
 @click.option('--clear', is_flag=True, help='Очистить существующую коллекцию')
-def index(project_path, collection_name, persist_dir, embedding_provider, embedding_model, ollama_url, exclude, clear):
+@click.option('--language', default="python", help="Язык проекта: python или javascript")
+def index(project_path, collection_name, persist_dir, embedding_provider, embedding_model, ollama_url, exclude, clear, language):
     """Индексирует Python проект в ChromaDB"""
     
-    console.print(f"[bold blue]🚀 Индексация проекта: {project_path}[/bold blue]")
+    console.print(lang.tr('indexing_project', project_path=project_path))
     
     # Инициализируем RAG движок
     rag_engine = create_rag_engine(
@@ -56,12 +60,13 @@ def index(project_path, collection_name, persist_dir, embedding_provider, embedd
         persist_dir=persist_dir,
         embedding_provider=embedding_provider,
         embedding_model=embedding_model,
-        ollama_url=ollama_url
+        ollama_url=ollama_url,
+        language=language
     )
     
     # Очищаем коллекцию если нужно
     if clear:
-        if Confirm.ask("Вы уверены, что хотите очистить существующую коллекцию?"):
+        if Confirm.ask(lang.tr('confirm_clear_collection')):
             rag_engine.clear_collection()
     
     # Индексируем проект
@@ -70,16 +75,16 @@ def index(project_path, collection_name, persist_dir, embedding_provider, embedd
     
     if summary:
         # Отображаем статистику
-        table = Table(title="Статистика индексации")
-        table.add_column("Метрика", style="cyan")
-        table.add_column("Значение", style="green")
+        table = Table(title=lang.tr('indexing_stats_title'))
+        table.add_column(lang.tr('metric'), style="cyan")
+        table.add_column(lang.tr('value'), style="green")
         
-        table.add_row("Всего элементов", str(summary['total_elements']))
-        table.add_row("Функций", str(summary['functions']))
-        table.add_row("Классов", str(summary['classes']))
-        table.add_row("Импортов", str(summary['imports']))
-        table.add_row("Файлов", str(summary['files_analyzed']))
-        table.add_row("Связей в графе", str(summary['call_graph_edges']))
+        table.add_row(lang.tr('total_elements'), str(summary['total_elements']))
+        table.add_row(lang.tr('functions'), str(summary['functions']))
+        table.add_row(lang.tr('classes'), str(summary['classes']))
+        table.add_row(lang.tr('imports'), str(summary['imports']))
+        table.add_row(lang.tr('files_analyzed'), str(summary['files_analyzed']))
+        table.add_row(lang.tr('call_graph_edges'), str(summary['call_graph_edges']))
         
         console.print(table)
         
@@ -87,10 +92,9 @@ def index(project_path, collection_name, persist_dir, embedding_provider, embedd
         docs = rag_engine.generate_project_documentation()
         with open("project_documentation.md", "w", encoding="utf-8") as f:
             f.write(docs)
-        
-        console.print("[green]✅ Индексация завершена! Документация сохранена в project_documentation.md[/green]")
+        console.print(lang.tr('indexing_complete', file='project_documentation.md'))
     else:
-        console.print("[red]❌ Ошибка индексации[/red]")
+        console.print(lang.tr('indexing_error'))
 
 @cli.command()
 @click.argument('query')
@@ -106,7 +110,7 @@ def index(project_path, collection_name, persist_dir, embedding_provider, embedd
 def search(query, collection_name, persist_dir, embedding_provider, embedding_model, ollama_url, limit, type_filter, file_filter):
     """Поиск по коду"""
     
-    console.print(f"[bold blue]🔍 Поиск: {query}[/bold blue]")
+    console.print(lang.tr('search_query', query=query))
     
     rag_engine = create_rag_engine(
         collection_name=collection_name,
@@ -124,23 +128,18 @@ def search(query, collection_name, persist_dir, embedding_provider, embedding_mo
     )
     
     if not results:
-        console.print("[yellow]Результаты не найдены[/yellow]")
+        console.print(lang.tr('no_results_found'))
         return
     
     for i, result in enumerate(results, 1):
         metadata = result['metadata']
         distance = result.get('distance', 0)
         
-        panel_title = f"Результат {i}: {metadata['name']} ({metadata['type']})"
-        panel_content = f"""
-[bold]Файл:[/bold] {metadata['file_path']}
-[bold]Строки:[/bold] {metadata['line_start']}-{metadata['line_end']}
-[bold]Релевантность:[/bold] {1-distance:.3f}
-[bold]Сложность:[/bold] {metadata.get('complexity', 'N/A')}
-
-[bold]Код:[/bold]
-{result['document'][:300]}...
-        """
+        panel_title = lang.tr('search_result_title', index=i, name=metadata['name'], type=metadata['type'])
+        panel_content = lang.tr('search_result_content', file_path=metadata['file_path'], 
+                                line_start=metadata['line_start'], line_end=metadata['line_end'], 
+                                relevance=1-distance, complexity=metadata.get('complexity', 'N/A'), 
+                                code=result['document'][:300])
         
         console.print(Panel(panel_content, title=panel_title, border_style="blue"))
 
@@ -154,7 +153,7 @@ def search(query, collection_name, persist_dir, embedding_provider, embedding_mo
 def analyze(function_name, collection_name, persist_dir, llm_provider, model, ollama_url):
     """Анализирует функцию с помощью LLM"""
     
-    console.print(f"[bold blue]🧠 Анализ функции: {function_name}[/bold blue]")
+    console.print(lang.tr('analyze_function', function_name=function_name))
     
     rag_engine = PythonRAGEngine(
         collection_name=collection_name,
@@ -169,7 +168,10 @@ def analyze(function_name, collection_name, persist_dir, llm_provider, model, ol
     )
     result = analyzer.analyze_function(function_name)
     
-    analyzer.display_analysis_result(result, "function")
+    if 'error' in result:
+        console.print(lang.tr('analysis_error', error=result['error']))
+    else:
+        analyzer.display_analysis_result(result, "function")
 
 @cli.command()
 @click.argument('function_name')
@@ -181,7 +183,7 @@ def analyze(function_name, collection_name, persist_dir, llm_provider, model, ol
 def flow(function_name, collection_name, persist_dir, llm_provider, model, ollama_url):
     """Анализирует flow выполнения кода"""
     
-    console.print(f"[bold blue]🌊 Анализ flow: {function_name}[/bold blue]")
+    console.print(lang.tr('analyze_flow', function_name=function_name))
     
     rag_engine = PythonRAGEngine(
         collection_name=collection_name,
@@ -209,7 +211,7 @@ def flow(function_name, collection_name, persist_dir, llm_provider, model, ollam
 def ask(question, collection_name, persist_dir, llm_provider, model, ollama_url, context):
     """Задает вопрос о коде"""
     
-    console.print(f"[bold blue]❓ Вопрос: {question}[/bold blue]")
+    console.print(lang.tr('ask_question', question=question))
     
     rag_engine = PythonRAGEngine(
         collection_name=collection_name,
@@ -236,7 +238,7 @@ def ask(question, collection_name, persist_dir, llm_provider, model, ollama_url,
 def improve(function_name, collection_name, persist_dir, llm_provider, model, ollama_url):
     """Предлагает улучшения для функции"""
     
-    console.print(f"[bold blue]⚡ Предложения по улучшению: {function_name}[/bold blue]")
+    console.print(lang.tr('suggest_improvements', function_name=function_name))
     
     rag_engine = PythonRAGEngine(
         collection_name=collection_name,
@@ -263,7 +265,7 @@ def improve(function_name, collection_name, persist_dir, llm_provider, model, ol
 def similar(function_name, collection_name, persist_dir, llm_provider, model, ollama_url):
     """Находит похожие функции"""
     
-    console.print(f"[bold blue]🔗 Поиск похожих функций: {function_name}[/bold blue]")
+    console.print(lang.tr('find_similar', function_name=function_name))
     
     rag_engine = PythonRAGEngine(
         collection_name=collection_name,
@@ -286,7 +288,7 @@ def similar(function_name, collection_name, persist_dir, llm_provider, model, ol
 def stats(collection_name, persist_dir):
     """Показывает статистику коллекции"""
     
-    console.print("[bold blue]📊 Статистика коллекции[/bold blue]")
+    console.print(lang.tr('collection_stats'))
     
     rag_engine = PythonRAGEngine(
         collection_name=collection_name,
@@ -295,14 +297,14 @@ def stats(collection_name, persist_dir):
     
     stats = rag_engine.get_collection_stats()
     
-    table = Table(title="Статистика ChromaDB")
-    table.add_column("Параметр", style="cyan")
-    table.add_column("Значение", style="green")
+    table = Table(title=lang.tr('chroma_stats_title'))
+    table.add_column(lang.tr('parameter'), style="cyan")
+    table.add_column(lang.tr('value'), style="green")
     
-    table.add_row("Коллекция", stats['collection_name'])
-    table.add_row("Документов", str(stats['total_documents']))
-    table.add_row("Директория", stats['persist_directory'])
-    table.add_row("Модель эмбеддингов", stats['embedding_model'])
+    table.add_row(lang.tr('collection_name'), stats['collection_name'])
+    table.add_row(lang.tr('total_documents'), str(stats['total_documents']))
+    table.add_row(lang.tr('persist_directory'), stats['persist_directory'])
+    table.add_row(lang.tr('embedding_model'), stats['embedding_model'])
     
     console.print(table)
 
@@ -313,7 +315,7 @@ def stats(collection_name, persist_dir):
 def file_summary(file_path, collection_name, persist_dir):
     """Показывает сводку по файлу"""
     
-    console.print(f"[bold blue]📄 Сводка по файлу: {file_path}[/bold blue]")
+    console.print(lang.tr('file_summary', file_path=file_path))
     
     rag_engine = PythonRAGEngine(
         collection_name=collection_name,
@@ -323,34 +325,37 @@ def file_summary(file_path, collection_name, persist_dir):
     summary = rag_engine.get_file_summary(file_path)
     
     if summary['total_elements'] == 0:
-        console.print("[yellow]Файл не найден в индексе[/yellow]")
+        console.print(lang.tr('file_not_found'))
         return
     
     # Общая статистика
-    table = Table(title=f"Статистика файла: {file_path}")
-    table.add_column("Тип", style="cyan")
-    table.add_column("Количество", style="green")
+    table = Table(title=lang.tr('file_stats_title', file_path=file_path))
+    table.add_column(lang.tr('type'), style="cyan")
+    table.add_column(lang.tr('count'), style="green")
     
-    table.add_row("Всего элементов", str(summary['total_elements']))
-    table.add_row("Функций", str(len(summary['functions'])))
-    table.add_row("Классов", str(len(summary['classes'])))
-    table.add_row("Импортов", str(len(summary['imports'])))
+    table.add_row(lang.tr('total_elements'), str(summary['total_elements']))
+    table.add_row(lang.tr('functions'), str(len(summary['functions'])))
+    table.add_row(lang.tr('classes'), str(len(summary['classes'])))
+    table.add_row(lang.tr('imports'), str(len(summary['imports'])))
     
     console.print(table)
     
     # Детали функций
     if summary['functions']:
-        console.print("\n[bold yellow]Функции:[/bold yellow]")
+        console.print(lang.tr('functions_details'))
         for func in summary['functions'][:10]:  # Показываем первые 10
             metadata = func['metadata']
-            console.print(f"• {metadata['name']} (строки {metadata['line_start']}-{metadata['line_end']}, сложность: {metadata['complexity']})")
+            console.print(lang.tr('function_detail', name=metadata['name'], 
+                                  line_start=metadata['line_start'], line_end=metadata['line_end'], 
+                                  complexity=metadata['complexity']))
     
     # Детали классов
     if summary['classes']:
-        console.print("\n[bold yellow]Классы:[/bold yellow]")
+        console.print(lang.tr('classes_details'))
         for cls in summary['classes']:
             metadata = cls['metadata']
-            console.print(f"• {metadata['name']} (строки {metadata['line_start']}-{metadata['line_end']})")
+            console.print(lang.tr('class_detail', name=metadata['name'], 
+                                  line_start=metadata['line_start'], line_end=metadata['line_end']))
 
 @cli.command()
 @click.option('--collection-name', '-c', default='python_code_rag', help='Имя коллекции ChromaDB')
@@ -364,8 +369,8 @@ def file_summary(file_path, collection_name, persist_dir):
 def interactive(collection_name, persist_dir, embedding_provider, embedding_model, llm_provider, llm_model, ollama_url):
     """Интерактивный режим работы с RAG системой"""
     
-    console.print("[bold blue]🎯 Интерактивный режим Python RAG System[/bold blue]")
-    console.print("Доступные команды: search, analyze, flow, ask, improve, similar, stats, quit")
+    console.print(lang.tr('interactive_mode'))
+    console.print(lang.tr('available_commands'))
     
     rag_engine = create_rag_engine(
         collection_name=collection_name,
@@ -384,59 +389,59 @@ def interactive(collection_name, persist_dir, embedding_provider, embedding_mode
     
     while True:
         try:
-            command = Prompt.ask("\n[bold cyan]Команда[/bold cyan]").strip().lower()
+            command = Prompt.ask(lang.tr('command_prompt')).strip().lower()
             
             if command == 'quit' or command == 'exit':
-                console.print("[green]До свидания! 👋[/green]")
+                console.print(lang.tr('goodbye'))
                 break
             
             elif command == 'search':
-                query = Prompt.ask("Поисковый запрос")
+                query = Prompt.ask(lang.tr('search_query_prompt'))
                 results = rag_engine.search(query, n_results=3)
                 
                 for i, result in enumerate(results, 1):
                     metadata = result['metadata']
-                    console.print(f"\n[bold]{i}. {metadata['name']} ({metadata['type']})[/bold]")
-                    console.print(f"Файл: {metadata['file_path']}")
-                    console.print(f"Код: {result['document'][:200]}...")
+                    console.print(lang.tr('search_result', index=i, name=metadata['name'], 
+                                          type=metadata['type'], file_path=metadata['file_path'], 
+                                          code=result['document'][:200]))
             
             elif command == 'analyze':
-                function_name = Prompt.ask("Имя функции для анализа")
+                function_name = Prompt.ask(lang.tr('analyze_function_prompt'))
                 result = analyzer.analyze_function(function_name)
                 analyzer.display_analysis_result(result, "function")
             
             elif command == 'flow':
-                function_name = Prompt.ask("Имя функции для анализа flow")
+                function_name = Prompt.ask(lang.tr('analyze_flow_prompt'))
                 result = analyzer.explain_code_flow(function_name)
                 analyzer.display_analysis_result(result, "flow")
             
             elif command == 'ask':
-                question = Prompt.ask("Ваш вопрос о коде")
+                question = Prompt.ask(lang.tr('ask_question_prompt'))
                 result = analyzer.answer_code_question(question)
                 analyzer.display_analysis_result(result, "question")
             
             elif command == 'improve':
-                function_name = Prompt.ask("Имя функции для улучшения")
+                function_name = Prompt.ask(lang.tr('improve_function_prompt'))
                 result = analyzer.suggest_improvements(function_name)
                 analyzer.display_analysis_result(result, "improvements")
             
             elif command == 'similar':
-                function_name = Prompt.ask("Имя функции для поиска похожих")
+                function_name = Prompt.ask(lang.tr('similar_function_prompt'))
                 result = analyzer.find_similar_functions(function_name)
                 analyzer.display_analysis_result(result, "similar")
             
             elif command == 'stats':
                 stats = rag_engine.get_collection_stats()
-                console.print(f"Документов в коллекции: {stats['total_documents']}")
+                console.print(lang.tr('collection_stats_summary', total_documents=stats['total_documents']))
             
             else:
-                console.print("[red]Неизвестная команда. Доступные: search, analyze, flow, ask, improve, similar, stats, quit[/red]")
+                console.print(lang.tr('unknown_command'))
         
         except KeyboardInterrupt:
-            console.print("\n[green]До свидания! 👋[/green]")
+            console.print(lang.tr('interrupted'))
             break
         except Exception as e:
-            console.print(f"[red]Ошибка: {e}[/red]")
+            console.print(lang.tr('error', error=str(e)))
 
 if __name__ == '__main__':
-    cli() 
+    cli()
