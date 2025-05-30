@@ -69,4 +69,21 @@ summary = rag_engine.index_project("./my_js_project")
 print(f"Indexed {summary['total_elements']} JS elements")
 ```
 
-// ...existing content would continue here, translated to English ...
+### JavaScript (Node.js) Dependencies Setup
+
+If you want to analyze JavaScript code, you need Node.js and npm.
+
+1. Install Node.js: https://nodejs.org/
+2. Initialize npm in the project root (if not already):
+   ```sh
+   npm init -y
+   ```
+3. Install required dependencies:
+   ```sh
+   npm install esprima
+   ```
+4. Now all JS analysis features are available!
+
+> The script `js_parser.js` is used for batch parsing of JavaScript files.
+
+### OpenAI API Setup (optional)
